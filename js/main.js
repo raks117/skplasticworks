@@ -140,7 +140,7 @@ if (contactForm) {
     );
 
     // Open mail client with pre-filled details
-    window.location.href = `mailto:skplasticworks@gmail.com?subject=${subject}&body=${body}`;
+    window.location.href = `mailto:177kbs@gmail.com?subject=${subject}&body=${body}`;
 
     showToast('✓ Opening your mail app to send the enquiry…');
     contactForm.reset();
@@ -190,7 +190,7 @@ if (scrapForm) {
       'Notes:\n'    + (scrapForm.querySelector('#scrap-notes')?.value || '-')
     );
 
-    window.location.href = `mailto:skplasticworks@gmail.com?subject=${subject}&body=${body}`;
+    window.location.href = `mailto:177kbs@gmail.com?subject=${subject}&body=${body}`;
     showToast('✓ Opening mail app with your scrap details…');
     scrapForm.reset();
   });
