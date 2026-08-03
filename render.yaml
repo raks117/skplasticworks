@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: sk-plastic-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
+    envVars:
+      - key: SCRAPE_API_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        value: https://raks117.github.io
+      - key: FLASK_DEBUG
+        value: "false"
