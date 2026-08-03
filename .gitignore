@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 .claude/
 backend/.venv/
+.env
+backend/.env

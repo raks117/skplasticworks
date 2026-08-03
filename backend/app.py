@@ -30,8 +30,16 @@ DATA_FILE       = os.path.join(BASE_DIR, 'data', 'schools.json')
 LOCK_FILE       = os.path.join(BASE_DIR, 'data', '.scrape.lock')
 INGREDIENTS_DB  = os.path.join(BASE_DIR, 'data', 'ingredients_db.json')
 
+# Allowed origins for the public API — comma-separated env var, e.g.
+# "https://raks117.github.io,https://www.example.com". Defaults to no
+# cross-origin access if unset (same-origin requests still work).
+_allowed_origins = [o.strip() for o in os.environ.get('ALLOWED_ORIGINS', '').split(',') if o.strip()]
+
+# Shared secret required to trigger a scrape (Authorization: Bearer <token>).
+SCRAPE_API_KEY = os.environ.get('SCRAPE_API_KEY', '')
+
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path='')
-CORS(app, resources={r'/api/*': {'origins': '*'}})
+CORS(app, resources={r'/api/*': {'origins': _allowed_origins or []}})
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [flask] %(message)s')
 log = logging.getLogger(__name__)
@@ -141,7 +149,7 @@ def _run_scrape():
 
     except Exception as exc:
         log.exception('Scrape failed: %s', exc)
-        _scrape_state['error']    = str(exc)
+        _scrape_state['error']    = 'Scrape failed — see server logs'
         _scrape_state['progress'] = 'Scrape failed — see server logs'
 
     finally:
@@ -194,7 +202,7 @@ def get_schools():
 
     except Exception as exc:
         log.exception('Error in /api/schools: %s', exc)
-        return jsonify({'error': 'Internal server error', 'detail': str(exc)}), 500
+        return jsonify({'error': 'Internal server error'}), 500
 
 
 @app.route('/api/status', methods=['GET'])
@@ -220,15 +228,34 @@ def get_status():
             'scrapeRunning': _scrape_state['running'],
         })
     except Exception as exc:
-        return jsonify({'error': str(exc)}), 500
+        log.exception('Error in /api/status: %s', exc)
+        return jsonify({'error': 'Internal server error'}), 500
+
+
+_scrape_rate_limit = {'last_call': 0.0}
+_SCRAPE_MIN_INTERVAL_SECONDS = 300  # at most once every 5 minutes
 
 
 @app.route('/api/scrape', methods=['POST'])
 def trigger_scrape():
     """
     Start a background scrape job (non-blocking).
-    Returns 409 if a scrape is already running.
+    Requires Authorization: Bearer <SCRAPE_API_KEY>.
+    Returns 409 if a scrape is already running, 429 if rate-limited.
     """
+    if not SCRAPE_API_KEY:
+        abort(503, description='Scrape endpoint is not configured (missing SCRAPE_API_KEY).')
+
+    auth_header = request.headers.get('Authorization', '')
+    provided = auth_header[7:] if auth_header.startswith('Bearer ') else ''
+    if not provided or provided != SCRAPE_API_KEY:
+        abort(401, description='Unauthorized')
+
+    now = time.time()
+    if now - _scrape_rate_limit['last_call'] < _SCRAPE_MIN_INTERVAL_SECONDS:
+        return jsonify({'status': 'rate_limited', 'message': 'Try again later'}), 429
+    _scrape_rate_limit['last_call'] = now
+
     with _scrape_lock:
         if _scrape_state['running']:
             return jsonify({
@@ -492,7 +519,7 @@ def api_score():
 
     except Exception as exc:
         log.exception('Error in /api/score: %s', exc)
-        return jsonify({'error': 'Internal server error', 'detail': str(exc)}), 500
+        return jsonify({'error': 'Internal server error'}), 500
 
 
 @app.route('/api/product/<barcode>', methods=['GET'])
@@ -558,7 +585,7 @@ def api_product(barcode):
         return jsonify({'found': False, 'error': 'Request timed out. Please try again.'}), 504
     except Exception as exc:
         log.exception('Error in /api/product: %s', exc)
-        return jsonify({'error': 'Internal server error', 'detail': str(exc)}), 500
+        return jsonify({'error': 'Internal server error'}), 500
 
 
 @app.route('/api/conditions', methods=['GET'])
@@ -569,7 +596,7 @@ def api_conditions():
         return jsonify(db.get('conditions', {}))
     except Exception as exc:
         log.exception('Error in /api/conditions: %s', exc)
-        return jsonify({'error': str(exc)}), 500
+        return jsonify({'error': 'Internal server error'}), 500
 
 
 # ── Reddit Reviews ────────────────────────────────────────────────────────────
@@ -734,7 +761,7 @@ def get_reviews():
         return jsonify({'error': 'Reddit request timed out', 'not_enough_info': True}), 504
     except Exception as exc:
         log.exception('Error fetching Reddit reviews: %s', exc)
-        return jsonify({'error': str(exc), 'not_enough_info': True}), 500
+        return jsonify({'error': 'Internal server error', 'not_enough_info': True}), 500
 
 
 # ── Static file serving ───────────────────────────────────────────────────────
@@ -761,6 +788,10 @@ def static_files(filename):
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
-    log.info('Starting Flask server → http://localhost:5000')
+    debug_mode = os.environ.get('FLASK_DEBUG', '').lower() in ('1', 'true', 'yes')
+    host = os.environ.get('FLASK_HOST', '127.0.0.1')
+    port = int(os.environ.get('PORT', 5000))
+
+    log.info('Starting Flask server → http://%s:%s (debug=%s)', host, port, debug_mode)
     log.info('Schools data file: %s', DATA_FILE)
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host=host, port=port, debug=debug_mode)
